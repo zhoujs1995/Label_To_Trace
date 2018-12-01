@@ -4,9 +4,9 @@
 #include <iostream>
 #include <sstream>
 #include <algorithm>
-#define LABEL_PATH "E:/data/MapMatcingData/Label.csv"
-#define LOG_PATH "E:/data/MapMatcingData/origin_data/"
-#define DATA_PATH "E:/data/MapMatcingData/process_data/"
+#define LABEL_PATH "D:/数据融合组/采集数据相关/Label_1021.csv"
+#define LOG_PATH "D:/数据融合组/待处理数据文件夹/"
+#define DATA_PATH "D:/数据融合组/已处理完成数据文件夹/"
 
 /*
 	本程序作用是生成地图匹配标准训练集，分为以下几个模块：
@@ -55,7 +55,7 @@ int main()
 		label_manager.logRead(log_name);
 
 		//写训练集文件，每个行动每个惯导模块，都有单独的文件
-		//label_manager.traceWrite(DATA_PATH + folder + "-" +name);
+		label_manager.traceWrite(DATA_PATH + folder + "-" + name);
 
 		//写步长文件，检测步长是否均匀
 		label_manager.getStepLength(DATA_PATH + folder + "-" + name);
@@ -63,5 +63,6 @@ int main()
 	cout << "-------------------------------------------------------------------------" << endl;
 	cout << "								 处理完成								      " << endl;
 	cout << "-------------------------------------------------------------------------" << endl;
+	system("pause");
 	return 0;
 }
