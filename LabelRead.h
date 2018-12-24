@@ -4,6 +4,7 @@
 #include <iostream>
 #include <string>
 
+
 struct serviceStatus
 {
 	bool activity_flag = false;
@@ -16,6 +17,7 @@ public:
 	LabelRead(LibRead *lib);
 	~LabelRead();
 	void init();
+	void stop();
 	void labelFileRead(string path);
 	void locFind(vector<vector<int>> line_data);
 	void traceWrite(string path);

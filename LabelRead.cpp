@@ -3,21 +3,41 @@
 #include <fstream>
 #include <sstream>
 #include <iomanip>
+#include <cstdlib>
 
-LabelRead::LabelRead(LibRead *libReader):lib_(libReader)
+double get_theta(double delta_x, double delta_y, double delta_x2, double delta_y2);
+double  get_r(double x0, double  y0, double x, double y);
+double axis_rotate(double x0, double y0, double x, double y, double rotate_theta, int t);
+LabelRead::LabelRead(LibRead *libReader) :lib_(libReader)
 {
 }
 
 LabelRead::~LabelRead()
 {
+
 }
 
 void LabelRead::init()
 {
 	//不同的行动时需要重新初始化
-	loc_.clear(); 
+	loc_.clear();
 	line_data_.clear();
 	log_data_.clear();
+	left_right_foot_.clear();
+	service_loc_.clear();
+	service_ins_.clear();
+	map_loc_.clear();
+}
+
+void LabelRead::stop()
+{
+	loc_.clear();
+	line_data_.clear();
+	log_data_.clear();
+	left_right_foot_.clear();
+	service_loc_.clear();
+	service_ins_.clear();
+	map_loc_.clear();
 }
 
 void LabelRead::labelFileRead(string path)
@@ -30,15 +50,15 @@ void LabelRead::labelFileRead(string path)
 	{
 		string temp;
 		vector<int> temp_vec;
-		temp_vec = GetStringFromlog(line_string,true);
+		temp_vec = GetStringFromlog(line_string, true);
 		strArray.push_back(temp_vec);
 	}
 	int profile_line_num = 0;
-	for (auto line :strArray)
+	for (auto line : strArray)
 	{
 		//首先读取第一个字符，若是控制字段，则 profile_line_num ++
 		//控制段应该写在data.txt的最前面
-		if (line[0]==999)
+		if (line[0] == 999)
 		{
 			//999保留字段是用来说明左右脚分别都有哪些模块
 			profile_line_num++;
@@ -50,7 +70,7 @@ void LabelRead::labelFileRead(string path)
 		}
 		//else if ( )
 		//{
-			//其他控制字符在这里添加
+		//其他控制字符在这里添加
 		//}
 		else
 		{
@@ -67,16 +87,16 @@ void LabelRead::locFind(vector<vector<int>> line_data)
 	//本模块是通过标签序列寻找标签坐标，并将标签坐标添加进service_loc_哈希表
 	//0:左 1：右
 	vector<Location> loc;
-	for (auto line:line_data)
+	for (auto line : line_data)
 	{
 		int left_right_flag = line[0];
 		if (line.size()>2)
 		{
 			//单标签时的坐标寻找
-			vector<Location> steps =  lib_->getLabelLocation(line[1], line[2], line[3]);
-			for (auto step:steps)
+			vector<Location> steps = lib_->getLabelLocation(line[1], line[2], line[3]);
+			for (auto step : steps)
 			{
-				for (auto service:left_right_foot_)
+				for (auto service : left_right_foot_)
 				{
 					if (service.second == left_right_flag)
 					{
@@ -133,27 +153,54 @@ void LabelRead::traceWrite(string path)
 	//测试数据的写入模块
 	//最开始的思路是以标签序列为准绳，对齐惯导数据，后发现惯导数据集长度远大于标签序列
 	//所以改变思路，将标签序列均分，使两者数据长度相同。
+	double x0, y0, x1, y1;
 	for (auto service : service_loc_)
 	{
 		int service_id = service.first;
 		vector<Location> loc = getMapLoc(service_id);
-		if (fabs(loc.size() - service_ins_[service_id].size())>2)
+		if (fabs((double)(loc.size() - service_ins_[service_id].size())) > 2)
 		{
 			throw("Waring:" + to_string(service_id) + "号模块数据未对齐，惯导数据集大小与标签数据集大小不一致");
 		}
 		fstream data_write;
 		data_write.close();
-		data_write.open(path + '-' + to_string(service_id) + ".csv",  std::ios::out);
+		data_write.open(path + '-' + to_string(service_id) + ".csv", std::ios::out);
 		int length = service_ins_[service_id].size() > loc.size() ? loc.size() : service_ins_[service_id].size();
+
+		//记录惯导数据的第一点坐标的向量夹角
 		for (int index = 0; index < length; index++)
 		{
-			for (auto axis: service_ins_[service_id][index])
-			{
-				data_write << setprecision(16)<< axis << ",";
+
+			vector<double> a(10, 0);
+			int i = 0, j = 0;
+			double theta;
+			for (auto axis : service_ins_[service_id][length - 3]) {
+
+				if (j == 0) { y1 = axis; }
+				else if (j == 1) { x1 = axis; }
+				j += 1;
 			}
-			data_write << setprecision(16) << loc[index][0] <<","<< loc[index][1]<<","<< loc[index][2]<<endl;
+			for (auto axis : service_ins_[service_id][index])
+			{
+
+				a[i] = axis;
+				if (index == 0 && i == 2) {
+					x0 = a[1];
+					y0 = a[0];
+				}
+				if (index == 1 && i == 2) {
+					//x1 = a[1];
+					//y1 = a[0];
+				}//希望得到惯导第二个坐标
+				i += 1;
+			}
+			if (index == 0) { theta = 0; }
+			else { theta = get_theta(loc[1][1] - loc[0][1], loc[1][0] - loc[0][0], x1 - x0, y1 - y0); }
+			data_write << setprecision(16) << axis_rotate(x0, y0, a[1], a[0], theta, 2) << "," << setprecision(16) << axis_rotate(x0, y0, a[1], a[0], theta, 1) << "," << setprecision(16) << a[2] << ",";
+			data_write << setprecision(16) << loc[index][0] << "," << loc[index][1] << "," << loc[index][2] << endl;
 		}
 		data_write.close();
+
 	}
 	for (auto service : service_loc_)
 	{
@@ -161,8 +208,8 @@ void LabelRead::traceWrite(string path)
 		vector<Location> loc = service_loc_[service_id];
 		fstream data_write;
 		data_write.close();
-		data_write.open(path + '-' + to_string(service_id)+"-origin" + ".csv", std::ios::out);
-		for (auto step:loc)
+		data_write.open(path + '-' + to_string(service_id) + "-origin" + ".csv", std::ios::out);
+		for (auto step : loc)
 		{
 			data_write << setprecision(16) << step[0] << "," << step[1] << "," << step[2] << endl;
 		}
@@ -176,10 +223,10 @@ vector<Location> LabelRead::getMapLoc(int service_id)
 	int size = service_ins_[service_id].size();
 	vector<Location> loc_list = service_loc_[service_id];
 	vector<Location> coordinate_list;
-	if (size < loc_list.size())
-		return coordinate_list;
-	if (loc_list.size() < 2)
-		return coordinate_list;
+	//if (size < loc_list.size())
+	//	return coordinate_list;
+	//if (loc_list.size() < 2)
+	//	return coordinate_list;
 
 	double total_length = getLength(service_id);
 	double step = total_length / (double)size;
@@ -192,7 +239,7 @@ vector<Location> LabelRead::getMapLoc(int service_id)
 		double dis = cur_loc.calDist(loc_list[next_loc_index]);
 		double cur_step = step;
 		//当步长大于接下来两个标签点间的距离时，需往第三个标签点延伸
-		while (next_loc_index<loc_list.size()-1 && dis < cur_step) {
+		while (next_loc_index < loc_list.size() - 1 && dis < cur_step) {
 			cur_step -= dis;
 			dis = loc_list[next_loc_index].calDist(loc_list[next_loc_index + 1]);
 			cur_loc = loc_list[next_loc_index];
@@ -216,7 +263,7 @@ double LabelRead::getLength(int service_id)
 	double sum = 0;
 	if (loc_list.size() < 1)
 		return 0.0;
-	for (int index = 1;index<loc_list.size();index++)
+	for (int index = 1; index<loc_list.size(); index++)
 	{
 		sum += loc_list[index].calDist(loc_list[index - 1]);
 	}
@@ -231,13 +278,13 @@ void LabelRead::logRead(string path)
 	inFile.open(path, std::ios::in);
 	string line_string;
 	vector<vector<double>> log_data;
-	while (getline(inFile,line_string))
+	while (getline(inFile, line_string))
 	{
 		vector<double> data = GetStringFromlog(line_string);
 		if (!data.empty())
 		{
 			log_data.push_back(data);
-		}	
+		}
 	}
 	logDataProcess(log_data);
 	return;
@@ -333,7 +380,7 @@ void LabelRead::logDataProcess(vector<vector<double>> log)
 		}
 	}
 	map<int, vector<double>>  last_step;
-	for (int index = 0;index<log.size();index++ )
+	for (int index = 0; index<log.size(); index++)
 	{
 		//读取ins.log的基本原则是，从2号起始位开始记录，到返回时第二次到达2号位结束。
 		int service_id = log[index][2];
@@ -344,9 +391,9 @@ void LabelRead::logDataProcess(vector<vector<double>> log)
 		if (!flag[service_id].start_flag && index >= start_end_index[service_id][0])
 		{
 			flag[service_id].start_flag = true;
-			last_step[service_id] = { 0,0 };
+			last_step[service_id] = { 0, 0 };
 		}
-			
+
 		if (flag[service_id].start_flag && index > start_end_index[service_id][1])
 			flag[service_id].start_flag = false;
 
@@ -360,41 +407,100 @@ void LabelRead::logDataProcess(vector<vector<double>> log)
 			step.push_back(log[index][7]);
 			step.push_back(log[index][8]);
 			service_ins_[service_id].push_back(step);
-			last_step[service_id] = { log[index][6] ,log[index][7] };
+			last_step[service_id] = { log[index][6], log[index][7] };
 		}
 	}
 }
 
 vector<int> LabelRead::getStartEndIndex(int service_id, vector<vector<double>> log)
 {
-	vector<int> status_2;
+	//vector<int> status_2;
+	map<int, int> order;
+	//map<int, double> distance;
 	int data_length = 0;
-	for (int index = 0; index<log.size();index++)
+	char headnum = 0, startflag = 0, first_2_num=0;  //starflay 用于选区起始位，在满足一定条件时选取起始点
+	int start_2_index, end_2_index;
+	for (int index = 0; index<log.size(); index++)
 	{
-		if (log[index][2] == service_id)
-			data_length++;
-		if (log[index][2] == service_id && fabs(log[index][9] - 2) < 1e-3)
-		{
-			status_2.push_back(index);
+		if (log[index][2] == service_id) {
+			if (fabs(log[index][9] - 1) < 1e-3) {            
+				headnum++;
+				if (headnum > 5 ) {                //如果出现了8个1  就置一个状态一  因为我们在在一号起始位会停留很久 有许多个1号位
+					startflag = 1;
+				}
+			}
+			else {
+				headnum = 0;
+			}		
 		}
-	}
-	if (status_2.size() < 2)
-		return{ 0,0 };
-	int max_dis = INT_MIN;
-	int index1 = 0, index2 = 0;
-	for (int i = 1; i < status_2.size(); i++)
-	{
-		if (status_2[i] - status_2[i - 1] > max_dis)
-		{
-			max_dis = status_2[i] - status_2[i - 1];
-			index1 = status_2[i - 1];
-			index2 = status_2[i];
+		if (startflag == 1) {
+			if (log[index][2] == service_id && fabs(log[index][9] - 0) < 1e-3) {
+				startflag = 2;
+			}
 		}
-	}
-	if (max_dis < (data_length / 2))
-		return{ 0,0 };
+		if (startflag == 2 && log[index][2] == service_id) {
+			if (fabs(log[index][9] - 2) < 1e-3) {
 
-	return {index1,index2};
+				start_2_index = index;//前15个中的最后一个2的索引
+			}
+
+			first_2_num++;
+			if (first_2_num >= 20){
+				startflag = 3;
+			}
+		}
+		if (startflag==3) {
+			if (log[index][2] == service_id) {
+				order[data_length] = index;
+				data_length++;			
+			}
+			//if (log[index][2] == service_id && fabs(log[index][9] - 2) < 1e-3)
+			//{
+			//	order[data_length] = index;
+			//	status_2.push_back(data_length);
+			//}
+		}
+	}
+	//data_length是112的长度
+	end_2_index = 0;
+	for (int i = data_length*0.8; i < data_length; i++) {
+		if (fabs(log[order[i]][9] - 2) < 1e-3) {
+			end_2_index = order[i];
+			break;
+		}
+	}
+	if (end_2_index == 0) {
+		return{ 0, 0 };
+	}
+	cout <<service_id <<"   "<< end_2_index << "  " << start_2_index << endl;
+	return{ start_2_index, end_2_index };
+	//if (status_2.size() < 2)
+	//	return{ 0, 0 };
+	//int max_dis = INT_MIN;
+	//int index1 = 0, index2 = 0;
+	//for (int i = 1; i < status_2.size(); i++)
+	//{
+	//	if (status_2[i] - status_2[i - 1] > max_dis)
+	//	{
+	//		max_dis = status_2[i] - status_2[i - 1];
+	//		index1 = status_2[i - 1];
+	//		index2 = status_2[i];
+	//	}
+	//}
+	//if (max_dis < (data_length*0.85))
+	//{
+	//	if (status_2.size()>4)
+	//	{
+	//		index1 = status_2[2];
+	//		index2 = status_2.back();
+	//	}
+	//	else
+	//	{
+	//		index1 = status_2.front();
+	//		index2 = status_2.back();
+	//	}
+	//}
+	//return{ order[index1], order[index2] };
 }
 
 void LabelRead::getStepLength(string path)
@@ -406,13 +512,44 @@ void LabelRead::getStepLength(string path)
 		fstream data_write;
 		data_write.close();
 		data_write.open(path + '-' + to_string(service_id) + "-step_length" + ".csv", std::ios::out);
-		for (int index = 1;index<data.size();index++)
+		for (int index = 1; index<data.size(); index++)
 		{
-			double dis = sqrt( pow(data[index][0] - data[index - 1][0],2) + pow(data[index][1] - data[index - 1][1], 2));
+			double dis = sqrt(pow(data[index][0] - data[index - 1][0], 2) + pow(data[index][1] - data[index - 1][1], 2));
 			if (abs(dis - 0) < 1e-3)
 				int a = 0;
 			data_write << setprecision(16) << dis << endl;
 		}
 		data_write.close();
+	}
+}
+
+double get_theta(double delta_x, double delta_y, double delta_x2, double delta_y2) {
+#include <math.h>
+	double theta;
+	double a = sqrt(delta_x*delta_x + delta_y * delta_y)*sqrt(delta_x2*delta_x2 + delta_y2 * delta_y2);
+	double cos_theta = (delta_x*delta_x2 + delta_y*delta_y2) / a;
+	theta = acos(cos_theta);
+	//判断是否逆时针旋转
+	double theta_bool = delta_x2 * delta_y - delta_y2 * delta_x;
+	if (theta_bool < 0) {
+		theta = 0 - theta;
+	}
+	return theta;
+}
+double  get_r(double x0, double  y0, double x, double y) {
+	double r;
+	r = sqrt((x - x0)*(x - x0) + (y - y0)*(y - y0));
+	return r;
+}
+double axis_rotate(double x0, double y0, double x, double y, double rotate_theta, int t) {
+
+
+	if (t == 1) {
+		return((x - x0)*cos(rotate_theta) - (y - y0)*sin(rotate_theta) + x0);
+
+	}
+	else if (t == 2) {
+		return((y - y0)*cos(rotate_theta) + (x - x0) * sin(rotate_theta) + y0);
+
 	}
 }
